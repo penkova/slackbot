@@ -2,18 +2,23 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/apenkova/slackbot/service"
+	"github.com/apenkova/slackbot/service/slackbot"
 	"io/ioutil"
 	"log"
-
-	"github.com/penkova/slackbot/slackbot"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 var (
+	errC   = make(chan error)
 	BotKey Token
 )
 
 type Token struct {
-	Token string `json:"token"`
+	Token   string `json:"token"`
+	WebHook string `json:"webhook"`
 }
 
 //reading token for my bot of token.json
@@ -28,5 +33,34 @@ func init() {
 }
 
 func main() {
-	slackbot.Run(BotKey.Token)
+	slackbot.RunBot(BotKey.Token)
+
+	service.RunTasks()
+
+	// HTTP
+	go run(service.ListenAndServeHTTP)
+	go slackbot.ListenQueue()
+
+	// Wait until complete
+	sig := make(chan os.Signal, 2)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
+	log.Println("WORK...")
+endless:
+	for {
+		select {
+		case err := <-errC:
+			log.Fatalf("Error: %s", err.Error())
+		case s := <-sig:
+			log.Printf("Signal (%v) received, stoppingn\n", s)
+			break endless
+		}
+	}
+	log.Println("END.")
+}
+
+func run(f func() error) {
+	if err := f(); err != nil {
+		errC <- err
+	}
 }
